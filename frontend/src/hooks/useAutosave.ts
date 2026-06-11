@@ -1,39 +1,39 @@
-import { useEffect, useRef } from 'react'
+import { useEffect, useRef } from "react";
 
-const SAVE_DELAY = 500
+const SAVE_DELAY = 500;
 
 export function useAutosave(value: string, storageKey: string) {
-  const valueRef = useRef(value)
+  const valueRef = useRef(value);
 
   useEffect(() => {
-    valueRef.current = value
-  }, [value])
+    valueRef.current = value;
+  }, [value]);
 
   useEffect(() => {
     const timer = setTimeout(() => {
       try {
-        localStorage.setItem(storageKey, value)
+        localStorage.setItem(storageKey, value);
       } catch (e) {
-        console.warn('Failed to save to localStorage', e)
+        console.warn("Failed to save to localStorage", e);
       }
-    }, SAVE_DELAY)
+    }, SAVE_DELAY);
 
-    return () => clearTimeout(timer)
-  }, [value, storageKey])
+    return () => clearTimeout(timer);
+  }, [value, storageKey]);
 
   useEffect(() => {
     function handleBeforeUnload() {
       try {
-        localStorage.setItem(storageKey, valueRef.current)
+        localStorage.setItem(storageKey, valueRef.current);
       } catch (e) {
-        console.warn('Failed to save on unload', e)
+        console.warn("Failed to save on unload", e);
       }
     }
 
-    window.addEventListener('beforeunload', handleBeforeUnload)
+    window.addEventListener("beforeunload", handleBeforeUnload);
     return () => {
-      window.removeEventListener('beforeunload', handleBeforeUnload)
-      handleBeforeUnload()
-    }
-  }, [storageKey])
+      window.removeEventListener("beforeunload", handleBeforeUnload);
+      handleBeforeUnload();
+    };
+  }, [storageKey]);
 }
