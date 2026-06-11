@@ -11,14 +11,16 @@ import {
   type PanelImperativeHandle,
 } from "react-resizable-panels";
 import { useAutosave } from "./hooks/useAutosave";
-
-const STORAGE_KEY = "p2p-text-editor";
+import StatusWorkspace from "./components/StatusWorkspace";
+import handleRoomHash from "./util/handleRoomHash";
 
 function App() {
+  const [roomId] = useState(handleRoomHash);
+
   const [content, setContent] = useState(
-    () => localStorage.getItem(STORAGE_KEY) ?? "",
+    () => localStorage.getItem(roomId) ?? "",
   );
-  useAutosave(content, STORAGE_KEY);
+  useAutosave(content, roomId);
   const panelRef = useRef<PanelImperativeHandle>(null);
 
   function handleLayoutChanged(layout: Layout) {
@@ -31,6 +33,7 @@ function App() {
   return (
     <>
       <h1 className="text-2xl font-bold mb-4">My App</h1>
+      <StatusWorkspace />
 
       <div className="flex flex-col w-full h-screen">
         <Group orientation="horizontal" onLayoutChange={handleLayoutChanged}>
