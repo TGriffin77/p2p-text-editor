@@ -1,5 +1,4 @@
 import { useEffect, useRef, useState } from "react";
-
 import "./App.css";
 import Editor from "./components/Editor";
 import Preview from "./components/Preview";
@@ -11,6 +10,8 @@ import {
   type PanelImperativeHandle,
 } from "react-resizable-panels";
 import { useAutosave } from "./hooks/useAutosave";
+import { useSignaling } from "./hooks/useSignaling";
+import { usePeerConnection } from "./hooks/usePeerConnection";
 import StatusWorkspace from "./components/StatusWorkspace";
 import handleRoomHash from "./util/handleRoomHash";
 
@@ -23,7 +24,32 @@ function App() {
   useAutosave(content, roomId);
   const panelRef = useRef<PanelImperativeHandle>(null);
 
-  // Handle manual url change, updating only is new hash is non-empty
+  const updatingFromRemoteRef = useRef(false);
+  const contentRef = useRef(content);
+  contentRef.current = content;
+
+  const { peerIds, sendSignal, onSignal, onPeerJoined, onPeerLeft } =
+    useSignaling(roomId);
+
+  const { send } = usePeerConnection(
+    sendSignal,
+    onSignal,
+    onPeerJoined,
+    onPeerLeft,
+    (data) => {
+      updatingFromRemoteRef.current = true;
+      setContent(data);
+      updatingFromRemoteRef.current = false;
+    },
+  );
+
+  // Send content changes to all connected peers
+  useEffect(() => {
+    if (updatingFromRemoteRef.current) return;
+    send(content);
+  }, [content, send]);
+
+  // Handle manual url change, updating only if new hash is non-empty
   useEffect(() => {
     const onHashChange = () => {
       const hash = window.location.hash;
@@ -49,11 +75,15 @@ function App() {
     }
   }
 
+  const peerCount = peerIds.length;
+
   return (
     <>
       <h1 className="text-2xl font-bold mb-4">My App</h1>
+      <div className="text-sm text-gray-500 mb-2">
+        Room: {roomId} | Peers: {peerCount}
+      </div>
       <StatusWorkspace />
-
       <div className="flex flex-col w-full h-screen">
         <Group orientation="horizontal" onLayoutChange={handleLayoutChanged}>
           <Panel
