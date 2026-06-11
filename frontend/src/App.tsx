@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import "./App.css";
 import Editor from "./components/Editor";
@@ -15,7 +15,7 @@ import StatusWorkspace from "./components/StatusWorkspace";
 import handleRoomHash from "./util/handleRoomHash";
 
 function App() {
-  const [roomId] = useState(handleRoomHash);
+  const [roomId, setRoomId] = useState(handleRoomHash);
 
   const [content, setContent] = useState(
     () => localStorage.getItem(roomId) ?? "",
@@ -23,6 +23,25 @@ function App() {
   useAutosave(content, roomId);
   const panelRef = useRef<PanelImperativeHandle>(null);
 
+  // Handle manual url change, updating only is new hash is non-empty
+  useEffect(() => {
+    const onHashChange = () => {
+      const hash = window.location.hash;
+      if (hash) {
+        setRoomId(hash);
+      }
+    };
+    window.addEventListener("hashchange", onHashChange);
+    return () => window.removeEventListener("hashchange", onHashChange);
+  }, []);
+
+  // when roomId is loaded, mount from localStorage
+  useEffect(() => {
+    const saved = localStorage.getItem(roomId);
+    setContent(saved ?? "");
+  }, [roomId]);
+
+  // Snapping functionality for middle of screen.
   function handleLayoutChanged(layout: Layout) {
     const editorSize = layout["editor"];
     if (editorSize !== 50 && editorSize > 48 && editorSize < 52) {
