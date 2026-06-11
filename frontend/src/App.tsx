@@ -4,9 +4,15 @@ import './App.css'
 import Editor from './components/Editor'
 import Preview from './components/Preview'
 import { Group, Panel, Separator, type Layout, type PanelImperativeHandle } from 'react-resizable-panels';
+import { useAutosave } from './hooks/useAutosave'
+
+const STORAGE_KEY = 'p2p-text-editor'
 
 function App() {
-  const [content, setContent] = useState('');
+  const [content, setContent] = useState(
+    () => localStorage.getItem(STORAGE_KEY) ?? ''
+  )
+  useAutosave(content, STORAGE_KEY)
   const panelRef = useRef<PanelImperativeHandle>(null);
 
   function handleLayoutChanged(layout: Layout){
