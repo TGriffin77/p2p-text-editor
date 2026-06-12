@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import "./App.css";
 import Editor from "./components/Editor";
 import Preview from "./components/Preview";
@@ -23,9 +23,9 @@ function App() {
   useAutosave(content, roomId);
   const panelRef = useRef<PanelImperativeHandle>(null);
 
-  const updatingFromRemoteRef = useRef(false);
   const contentRef = useRef(content);
   contentRef.current = content;
+  const sendTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
 
   const { myId, peerIds, sendSignal, onSignal, onPeerJoined, onPeerLeft } =
     useSignaling(roomId);
@@ -36,9 +36,7 @@ function App() {
     onPeerJoined,
     onPeerLeft,
     (data) => {
-      updatingFromRemoteRef.current = true;
       setContent(data);
-      updatingFromRemoteRef.current = false;
     },
     () => contentRef.current,
   );
@@ -63,12 +61,16 @@ function App() {
     initialJoinRef.current = false;
   }, [roomId]);
 
-  // Send content changes to all connected peers
-  useEffect(() => {
-    if (updatingFromRemoteRef.current) return;
-    if (!content) return;
-    send(content);
-  }, [content, send]);
+  const handleChange = useCallback(
+    (newContent: string) => {
+      setContent(newContent);
+      clearTimeout(sendTimerRef.current);
+      sendTimerRef.current = setTimeout(() => {
+        send(contentRef.current);
+      }, 150);
+    },
+    [send],
+  );
 
   // Handle manual url change, updating only if new hash is non-empty
   useEffect(() => {
@@ -107,7 +109,7 @@ function App() {
             defaultSize="50%"
             minSize="30%"
           >
-            <Editor value={content} onChange={setContent} />
+            <Editor value={content} onChange={handleChange} />
           </Panel>
           <Separator />
           <Panel id="preview" defaultSize="50%" minSize="30%">
