@@ -82,12 +82,13 @@ export function useSignaling(roomId: string) {
     };
 
     ws.onclose = () => {
-      wsRef.current = null;
+      if (wsRef.current === ws) {
+        wsRef.current = null;
+      }
     };
 
     return () => {
       ws.close();
-      wsRef.current = null;
       setMyId(null);
       setPeerIds([]);
     };

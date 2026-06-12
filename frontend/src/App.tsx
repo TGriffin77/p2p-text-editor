@@ -18,9 +18,8 @@ import handleRoomHash from "./util/handleRoomHash";
 function App() {
   const [roomId, setRoomId] = useState(handleRoomHash);
 
-  const [content, setContent] = useState(
-    () => localStorage.getItem(roomId) ?? "",
-  );
+  // Start empty — localStorage is only loaded after signaling confirms we're alone
+  const [content, setContent] = useState("");
   useAutosave(content, roomId);
   const panelRef = useRef<PanelImperativeHandle>(null);
 
@@ -28,7 +27,7 @@ function App() {
   const contentRef = useRef(content);
   contentRef.current = content;
 
-  const { peerIds, sendSignal, onSignal, onPeerJoined, onPeerLeft } =
+  const { myId, peerIds, sendSignal, onSignal, onPeerJoined, onPeerLeft } =
     useSignaling(roomId);
 
   const { send } = usePeerConnection(
@@ -41,11 +40,33 @@ function App() {
       setContent(data);
       updatingFromRemoteRef.current = false;
     },
+    () => contentRef.current,
   );
+
+  // Once signaling confirms our room join (myId is set), load from localStorage
+  // only if we're alone in the room. If peers exist, their content is the truth.
+  const initialJoinRef = useRef(false);
+  useEffect(() => {
+    if (myId && !initialJoinRef.current) {
+      initialJoinRef.current = true;
+      const saved = localStorage.getItem(roomId);
+      if (saved) setContent(saved);
+    }
+    if (!myId) {
+      initialJoinRef.current = false;
+    }
+  }, [myId, peerIds, roomId]);
+
+  // When roomId changes, reset and wait for the new room's signal
+  useEffect(() => {
+    setContent("");
+    initialJoinRef.current = false;
+  }, [roomId]);
 
   // Send content changes to all connected peers
   useEffect(() => {
     if (updatingFromRemoteRef.current) return;
+    if (!content) return;
     send(content);
   }, [content, send]);
 
@@ -60,12 +81,6 @@ function App() {
     window.addEventListener("hashchange", onHashChange);
     return () => window.removeEventListener("hashchange", onHashChange);
   }, []);
-
-  // when roomId is loaded, mount from localStorage
-  useEffect(() => {
-    const saved = localStorage.getItem(roomId);
-    setContent(saved ?? "");
-  }, [roomId]);
 
   // Snapping functionality for middle of screen.
   function handleLayoutChanged(layout: Layout) {

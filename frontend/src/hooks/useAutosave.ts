@@ -10,6 +10,7 @@ export function useAutosave(value: string, storageKey: string) {
   }, [value]);
 
   useEffect(() => {
+    if (!value) return;
     const timer = setTimeout(() => {
       try {
         localStorage.setItem(storageKey, value);
@@ -33,7 +34,9 @@ export function useAutosave(value: string, storageKey: string) {
     window.addEventListener("beforeunload", handleBeforeUnload);
     return () => {
       window.removeEventListener("beforeunload", handleBeforeUnload);
-      handleBeforeUnload();
+      if (valueRef.current) {
+        handleBeforeUnload();
+      }
     };
   }, [storageKey]);
 }

@@ -15,6 +15,7 @@ export function usePeerConnection(
   onPeerJoined: (cb: (peerId: string) => void) => () => void,
   onPeerLeft: (cb: (peerId: string) => void) => () => void,
   onData: (data: string) => void,
+  getLatestContent: () => string,
 ) {
   const pcsRef = useRef(new Map<string, RTCPeerConnection>());
   const dcsRef = useRef(new Map<string, RTCDataChannel>());
@@ -22,6 +23,25 @@ export function usePeerConnection(
   sendSignalRef.current = sendSignal;
   const onDataRef = useRef(onData);
   onDataRef.current = onData;
+  const getLatestRef = useRef(getLatestContent);
+  getLatestRef.current = getLatestContent;
+
+  const flush = useCallback((dc: RTCDataChannel) => {
+    const content = getLatestRef.current();
+    if (content && dc.readyState === "open") {
+      dc.send(content);
+    }
+  }, []);
+
+  const setupDC = useCallback((dc: RTCDataChannel, peerId: string) => {
+    dcsRef.current.set(peerId, dc);
+
+    dc.onmessage = (e) => onDataRef.current(e.data);
+
+    dc.onopen = () => {
+      flush(dc);
+    };
+  }, [flush]);
 
   const cleanup = useCallback((peerId: string) => {
     const dc = dcsRef.current.get(peerId);
@@ -38,11 +58,15 @@ export function usePeerConnection(
 
   const createPeer = useCallback(
     (peerId: string, initiator: boolean) => {
+      // StrictMode remount will recreate peers for the same peerId —
+      // destroy the old one first so it doesn't orphan
+      cleanup(peerId);
+
       const pc = new RTCPeerConnection(RTC_CONFIG);
       pcsRef.current.set(peerId, pc);
 
       pc.onicecandidate = (e) => {
-        if (e.candidate) {
+        if (e.candidate && pcsRef.current.get(peerId) === pc) {
           sendSignalRef.current(peerId, {
             ice: e.candidate.toJSON(),
           });
@@ -51,9 +75,10 @@ export function usePeerConnection(
 
       pc.onconnectionstatechange = () => {
         if (
-          pc.connectionState === "disconnected" ||
-          pc.connectionState === "failed" ||
-          pc.connectionState === "closed"
+          (pc.connectionState === "disconnected" ||
+            pc.connectionState === "failed" ||
+            pc.connectionState === "closed") &&
+          pcsRef.current.get(peerId) === pc
         ) {
           cleanup(peerId);
         }
@@ -61,9 +86,7 @@ export function usePeerConnection(
 
       if (initiator) {
         const dc = pc.createDataChannel("text");
-        dcsRef.current.set(peerId, dc);
-
-        dc.onmessage = (e) => onDataRef.current(e.data);
+        setupDC(dc, peerId);
 
         pc.createOffer()
           .then((offer) => pc.setLocalDescription(offer))
@@ -75,15 +98,13 @@ export function usePeerConnection(
           .catch(console.error);
       } else {
         pc.ondatachannel = (e) => {
-          const dc = e.channel;
-          dcsRef.current.set(peerId, dc);
-          dc.onmessage = (ev) => onDataRef.current(ev.data);
+          setupDC(e.channel, peerId);
         };
       }
 
       return pc;
     },
-    [cleanup],
+    [cleanup, setupDC],
   );
 
   const handleSignal = useCallback(
@@ -94,7 +115,9 @@ export function usePeerConnection(
       if (data.offer) {
         pc = createPeer(from, false);
         try {
-          await pc.setRemoteDescription(new RTCSessionDescription(data.offer));
+          await pc.setRemoteDescription(
+            new RTCSessionDescription(data.offer),
+          );
           const answer = await pc.createAnswer();
           await pc.setLocalDescription(answer);
           sendSignalRef.current(from, {
@@ -107,7 +130,9 @@ export function usePeerConnection(
       } else if (data.answer) {
         if (!pc) return;
         try {
-          await pc.setRemoteDescription(new RTCSessionDescription(data.answer));
+          await pc.setRemoteDescription(
+            new RTCSessionDescription(data.answer),
+          );
         } catch (err) {
           console.error("Signal error (answer):", err);
         }
@@ -133,9 +158,6 @@ export function usePeerConnection(
       unsubSignal();
       unsubJoin();
       unsubLeave();
-      for (const peerId of pcsRef.current.keys()) {
-        cleanup(peerId);
-      }
     };
   }, [onSignal, onPeerJoined, onPeerLeft, handleSignal, createPeer, cleanup]);
 
