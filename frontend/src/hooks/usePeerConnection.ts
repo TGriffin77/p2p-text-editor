@@ -1,7 +1,14 @@
 import { useEffect, useRef, useCallback } from "react";
 
 const RTC_CONFIG: RTCConfiguration = {
-  iceServers: [{ urls: "stun:stun.l.google.com:19302" }],
+  iceServers: [
+    { urls: "stun:stun.relay.metered.ca:80" },
+    {
+      urls: "turn:global.relay.metered.ca:80",
+      username: import.meta.env.VITE_TURN_USERNAME,
+      credential: import.meta.env.VITE_TURN_CREDENTIAL,
+    },
+  ],
 };
 
 interface SignalMessage {
@@ -33,15 +40,18 @@ export function usePeerConnection(
     }
   }, []);
 
-  const setupDC = useCallback((dc: RTCDataChannel, peerId: string) => {
-    dcsRef.current.set(peerId, dc);
+  const setupDC = useCallback(
+    (dc: RTCDataChannel, peerId: string) => {
+      dcsRef.current.set(peerId, dc);
 
-    dc.onmessage = (e) => onDataRef.current(e.data);
+      dc.onmessage = (e) => onDataRef.current(e.data);
 
-    dc.onopen = () => {
-      flush(dc);
-    };
-  }, [flush]);
+      dc.onopen = () => {
+        flush(dc);
+      };
+    },
+    [flush],
+  );
 
   const cleanup = useCallback((peerId: string) => {
     const dc = dcsRef.current.get(peerId);
@@ -115,9 +125,7 @@ export function usePeerConnection(
       if (data.offer) {
         pc = createPeer(from, false);
         try {
-          await pc.setRemoteDescription(
-            new RTCSessionDescription(data.offer),
-          );
+          await pc.setRemoteDescription(new RTCSessionDescription(data.offer));
           const answer = await pc.createAnswer();
           await pc.setLocalDescription(answer);
           sendSignalRef.current(from, {
@@ -130,9 +138,7 @@ export function usePeerConnection(
       } else if (data.answer) {
         if (!pc) return;
         try {
-          await pc.setRemoteDescription(
-            new RTCSessionDescription(data.answer),
-          );
+          await pc.setRemoteDescription(new RTCSessionDescription(data.answer));
         } catch (err) {
           console.error("Signal error (answer):", err);
         }
