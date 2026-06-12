@@ -5,6 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "devh": "vite --host",
     "build": "tsc -b && vite build",
     "lint": "eslint .",
     "preview": "vite preview"
@@ -16,7 +17,10 @@
     "react-dom": "^19.2.6",
     "react-markdown": "^10.1.0",
     "react-resizable-panels": "^4.11.2",
-    "remark-gfm": "^4.0.1"
+    "remark-gfm": "^4.0.1",
+    "y-indexeddb": "^9.0.12",
+    "y-webrtc": "^10.3.0",
+    "yjs": "^13.6.31"
   },
   "devDependencies": {
     "@babel/core": "^7.29.0",
@@ -26,6 +30,7 @@
     "@types/node": "^24.12.3",
     "@types/react": "^19.2.14",
     "@types/react-dom": "^19.2.3",
+    "@vitejs/plugin-basic-ssl": "^2.3.0",
     "@vitejs/plugin-react": "^6.0.1",
     "autoprefixer": "^10.5.0",
     "babel-plugin-react-compiler": "^1.0.0",

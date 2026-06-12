@@ -1,20 +1,12 @@
 import { WebSocketServer, WebSocket } from "ws";
 
-const PORT = 3001;
+const PORT = parseInt(process.env.PORT || "3001");
 
-const rooms = new Map<string, Map<WebSocket, string>>();
-let connectionCounter = 0;
+const topics = new Map<string, Set<WebSocket>>();
 
-function peerId(socket: WebSocket): string | undefined {
-  for (const room of rooms.values()) {
-    const id = room.get(socket);
-    if (id) return id;
-  }
-}
-
-function send(socket: WebSocket, msg: object) {
-  if (socket.readyState === WebSocket.OPEN) {
-    socket.send(JSON.stringify(msg));
+function send(conn: WebSocket, message: object) {
+  if (conn.readyState === WebSocket.OPEN) {
+    conn.send(JSON.stringify(message));
   }
 }
 
@@ -22,123 +14,81 @@ function timestamp(): string {
   return new Date().toLocaleTimeString();
 }
 
-function signalType(data: any): string {
-  if (data.offer) return "offer";
-  if (data.answer) return "answer";
-  if (data.ice) return "ice-candidate";
-  return "unknown";
-}
-
 const wss = new WebSocketServer({ port: PORT });
-console.log(`[${timestamp()}] Signaling server running on ws://localhost:${PORT}`);
+console.log(`[${timestamp()}] y-webrtc signaling server running on ws://localhost:${PORT}`);
 
-wss.on("connection", (socket) => {
-  let currentRoomId: string | null = null;
-  let myId: string | null = null;
-  const connId = ++connectionCounter;
+wss.on("connection", (conn) => {
+  const subscribedTopics = new Set<string>();
+  let closed = false;
 
-  console.log(`[${timestamp()}] [connect] client #${connId} connected (total: ${connectionCounter})`);
+  const connId = `#${Math.random().toString(36).slice(2, 6)}`;
 
-  socket.on("message", (raw) => {
-    let msg: any;
+  console.log(`[${timestamp()}] ${connId} connected`);
+
+  conn.on("message", (raw) => {
+    let message: any;
     try {
-      msg = JSON.parse(raw.toString());
+      message = JSON.parse(raw.toString());
     } catch {
       return;
     }
+    if (!message?.type || closed) return;
 
-    switch (msg.type) {
-      case "join-room": {
-        const roomId = msg.roomId;
-        if (!roomId || typeof roomId !== "string") return;
-
-        // Leave previous room if any
-        if (currentRoomId) {
-          const prevRoom = rooms.get(currentRoomId);
-          if (prevRoom) {
-            prevRoom.delete(socket);
-            console.log(`[${timestamp()}] [leave] client #${connId} left room "${currentRoomId}"`);
-            if (prevRoom.size === 0) {
-              rooms.delete(currentRoomId);
-              console.log(`[${timestamp()}] [room] room "${currentRoomId}" deleted (empty)`);
-            }
-          }
-        }
-
-        let room = rooms.get(roomId);
-        if (!room) {
-          room = new Map();
-          rooms.set(roomId, room);
-          console.log(`[${timestamp()}] [room] room "${roomId}" created`);
-        }
-
-        myId = crypto.randomUUID();
-        room.set(socket, myId);
-        currentRoomId = roomId;
-
-        const peerIds: string[] = [];
-        for (const [peer, pid] of room) {
-          if (peer !== socket) peerIds.push(pid);
-        }
-
-        send(socket, { type: "room-joined", roomId, myId, peerIds });
-        console.log(`[${timestamp()}] [join] peer ${myId.slice(0, 8)} joined "${roomId}" (room size: ${room.size})`);
-
-        // Notify existing peers
-        for (const [peer, pid] of room) {
-          if (peer !== socket) {
-            send(peer, { type: "peer-joined", peerId: myId });
-            console.log(`[${timestamp()}] [join] notified peer ${pid.slice(0, 8)} of new peer ${myId.slice(0, 8)}`);
-          }
-        }
+    switch (message.type) {
+      case "subscribe":
+        (message.topics || []).forEach((topic: string) => {
+          if (typeof topic !== "string") return;
+          if (subscribedTopics.has(topic)) return;
+          const set = topics.get(topic) ?? new Set();
+          set.add(conn);
+          topics.set(topic, set);
+          subscribedTopics.add(topic);
+          console.log(`[${timestamp()}] ${connId} subscribed to "${topic}"`);
+        });
         break;
-      }
-
-      case "signal": {
-        const targetId = msg.to;
-        const data = msg.data;
-        if (!targetId || !currentRoomId) return;
-
-        const room = rooms.get(currentRoomId);
-        if (!room) return;
-
-        const senderId = peerId(socket);
-        console.log(`[${timestamp()}] [signal] ${signalType(data)} from ${(senderId ?? "?").slice(0, 8)} -> ${targetId.slice(0, 8)}`);
-
-        for (const [peer, pid] of room) {
-          if (pid === targetId) {
-            send(peer, {
-              type: "signal",
-              from: senderId,
-              data,
+      case "unsubscribe":
+        (message.topics || []).forEach((topic: string) => {
+          const set = topics.get(topic);
+          if (set) {
+            set.delete(conn);
+            if (set.size === 0) topics.delete(topic);
+          }
+          subscribedTopics.delete(topic);
+          console.log(`[${timestamp()}] ${connId} unsubscribed from "${topic}"`);
+        });
+        break;
+      case "publish":
+        if (message.topic) {
+          const receivers = topics.get(message.topic);
+          if (receivers) {
+            const payload = JSON.stringify(message);
+            receivers.forEach((peer) => {
+              if (peer !== conn && peer.readyState === WebSocket.OPEN) {
+                peer.send(payload);
+              }
             });
-            break;
           }
         }
         break;
-      }
+      case "ping":
+        send(conn, { type: "pong" });
+        break;
     }
   });
 
-  socket.on("close", () => {
-    connectionCounter--;
-    console.log(`[${timestamp()}] [disconnect] client #${connId} disconnected (total: ${connectionCounter})`);
-
-    if (!currentRoomId) return;
-    const room = rooms.get(currentRoomId);
-    if (!room) return;
-
-    const leavingId = room.get(socket);
-    room.delete(socket);
-
-    if (room.size === 0) {
-      rooms.delete(currentRoomId);
-      console.log(`[${timestamp()}] [room] room "${currentRoomId}" deleted (empty)`);
-    } else {
-      console.log(`[${timestamp()}] [leave] peer ${(leavingId ?? "?").slice(0, 8)} left "${currentRoomId}" (room size: ${room.size})`);
-      for (const [peer] of room) {
-        send(peer, { type: "peer-left", peerId: leavingId });
+  conn.on("close", (code, reason) => {
+    closed = true;
+    subscribedTopics.forEach((topic) => {
+      const set = topics.get(topic);
+      if (set) {
+        set.delete(conn);
+        if (set.size === 0) topics.delete(topic);
       }
-    }
+    });
+    console.log(`[${timestamp()}] ${connId} disconnected (code=${code} reason=${reason.toString().slice(0, 40) || "none"})`);
+  });
+
+  conn.on("error", (err) => {
+    console.error(`[${timestamp()}] ${connId} error:`, err.message);
   });
 });

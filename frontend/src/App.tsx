@@ -9,82 +9,65 @@ import {
   type Layout,
   type PanelImperativeHandle,
 } from "react-resizable-panels";
-import { useAutosave } from "./hooks/useAutosave";
-import { useSignaling } from "./hooks/useSignaling";
-import { usePeerConnection } from "./hooks/usePeerConnection";
+import { useYjs } from "./hooks/useYjs";
 import StatusWorkspace from "./components/StatusWorkspace";
 import handleRoomHash from "./util/handleRoomHash";
 
 function App() {
   const [roomId, setRoomId] = useState(handleRoomHash);
+  const { ydoc, ytext, provider } = useYjs(roomId);
 
-  // Start empty — localStorage is only loaded after signaling confirms we're alone
   const [content, setContent] = useState("");
-  useAutosave(content, roomId);
+  const [peerIds, setPeerIds] = useState<string[]>([]);
   const panelRef = useRef<PanelImperativeHandle>(null);
 
-  const contentRef = useRef(content);
-  contentRef.current = content;
-  const sendTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
-
-  const { myId, peerIds, sendSignal, onSignal, onPeerJoined, onPeerLeft } =
-    useSignaling(roomId);
-
-  const { send } = usePeerConnection(
-    sendSignal,
-    onSignal,
-    onPeerJoined,
-    onPeerLeft,
-    (data) => {
-      setContent(data);
-    },
-    () => contentRef.current,
-  );
-
-  // Once signaling confirms our room join (myId is set), load from localStorage
-  // only if we're alone in the room. If peers exist, their content is the truth.
-  const initialJoinRef = useRef(false);
+  // ytext → content (remote changes + initial persisted load)
   useEffect(() => {
-    if (myId && !initialJoinRef.current) {
-      initialJoinRef.current = true;
-      const saved = localStorage.getItem(roomId);
-      if (saved) setContent(saved);
-    }
-    if (!myId) {
-      initialJoinRef.current = false;
-    }
-  }, [myId, peerIds, roomId]);
+    const handler = (_event: unknown, txn: unknown) => {
+      const transaction = txn as { origin?: unknown };
+      if (transaction.origin === "user") return;
+      setContent(ytext.toString());
+    };
+    ytext.observe(handler);
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- initialize from external Yjs store
+    setContent(ytext.toString());
+    return () => ytext.unobserve(handler);
+  }, [ytext]);
 
-  // When roomId changes, reset and wait for the new room's signal
+  // Track connected peers
   useEffect(() => {
-    setContent("");
-    initialJoinRef.current = false;
-  }, [roomId]);
+    const handler = (event: {
+      webrtcPeers: string[];
+      bcPeers: string[];
+    }) => {
+      setPeerIds([...event.webrtcPeers, ...event.bcPeers]);
+    };
+    provider.on("peers", handler);
+    return () => provider.off("peers", handler);
+  }, [provider]);
 
+  // content → ytext (local edits)
   const handleChange = useCallback(
     (newContent: string) => {
+      ydoc.transact(() => {
+        ytext.delete(0, ytext.length);
+        ytext.insert(0, newContent);
+      }, "user");
       setContent(newContent);
-      clearTimeout(sendTimerRef.current);
-      sendTimerRef.current = setTimeout(() => {
-        send(contentRef.current);
-      }, 150);
     },
-    [send],
+    [ydoc, ytext],
   );
 
-  // Handle manual url change, updating only if new hash is non-empty
+  // Handle manual hash change
   useEffect(() => {
     const onHashChange = () => {
       const hash = window.location.hash;
-      if (hash) {
-        setRoomId(hash);
-      }
+      if (hash) setRoomId(hash);
     };
     window.addEventListener("hashchange", onHashChange);
     return () => window.removeEventListener("hashchange", onHashChange);
   }, []);
 
-  // Snapping functionality for middle of screen.
   function handleLayoutChanged(layout: Layout) {
     const editorSize = layout["editor"];
     if (editorSize !== 50 && editorSize > 48 && editorSize < 52) {
