@@ -1,4 +1,4 @@
-import { useEffect, useMemo } from "react";
+import { useEffect } from "react";
 import * as Y from "yjs";
 import { WebrtcProvider } from "y-webrtc";
 import { IndexeddbPersistence } from "y-indexeddb";
@@ -20,28 +20,54 @@ function lsKey(roomName: string) {
   return `p2p-editor-${roomName}`;
 }
 
+interface CachedEntry {
+  ydoc: Y.Doc;
+  ytext: Y.Text;
+  provider: WebrtcProvider;
+  indexeddb: IndexeddbPersistence;
+  refCount: number;
+}
+
+const cache = new Map<string, CachedEntry>();
+
 export function useYjs(roomId: string) {
   const roomName = roomId.startsWith("#") ? roomId.slice(1) : roomId;
 
-  // eslint-disable-next-line react-hooks/exhaustive-deps -- recreate Y.Doc on room change
-  const ydoc = useMemo(() => new Y.Doc(), [roomName]);
-  const ytext = useMemo(() => ydoc.getText("content"), [ydoc]);
+  let entry = cache.get(roomName);
+  if (!entry) {
+    const ydoc = new Y.Doc();
+    const ytext = ydoc.getText("content");
+    const provider = new WebrtcProvider(roomName, ydoc, {
+      signaling: [WS_URL],
+      peerOpts: { config: TURN_CONFIG },
+    });
+    const indexeddb = new IndexeddbPersistence(roomName, ydoc);
+    entry = { ydoc, ytext, provider, indexeddb, refCount: 0 };
+    cache.set(roomName, entry);
+  }
 
-  const provider = useMemo(
-    () =>
-      new WebrtcProvider(roomName, ydoc, {
-        signaling: [WS_URL],
-        peerOpts: { config: TURN_CONFIG },
-      }),
-    [roomName, ydoc],
-  );
+  const { ydoc, ytext, provider, indexeddb } = entry;
 
-  const indexeddb = useMemo(
-    () => new IndexeddbPersistence(roomName, ydoc),
-    [roomName, ydoc],
-  );
+  useEffect(() => {
+    const e = cache.get(roomName);
+    if (!e) return;
+    e.refCount++;
 
-  // Restore from localStorage if y-indexeddb has no persisted data
+    return () => {
+      e.refCount--;
+      if (e.refCount <= 0) {
+        Promise.resolve().then(() => {
+          if (e.refCount <= 0) {
+            cache.delete(roomName);
+            e.indexeddb.destroy();
+            e.provider.destroy();
+            e.ydoc.destroy();
+          }
+        });
+      }
+    };
+  }, [roomName]);
+
   useEffect(() => {
     let cancelled = false;
     const key = lsKey(roomName);
@@ -76,7 +102,6 @@ export function useYjs(roomId: string) {
     };
   }, [roomName, indexeddb, ydoc, ytext]);
 
-  // Save a snapshot to localStorage on beforeunload and periodically
   useEffect(() => {
     const key = lsKey(roomName);
     const save = () => {
@@ -93,15 +118,6 @@ export function useYjs(roomId: string) {
       save();
     };
   }, [roomName, ydoc]);
-
-  // Clean up everything when roomId changes or component unmounts
-  useEffect(() => {
-    return () => {
-      indexeddb.destroy();
-      provider.destroy();
-      ydoc.destroy();
-    };
-  }, [indexeddb, provider, ydoc]);
 
   return { ydoc, ytext, provider };
 }
