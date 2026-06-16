@@ -4,7 +4,7 @@
   "version": "0.0.0",
   "type": "module",
   "scripts": {
-    "dev": "vite",
+    "dev": "vite --host",
     "devh": "vite --host",
     "build": "tsc -b && vite build",
     "lint": "eslint .",
@@ -22,7 +22,7 @@
     "remark-gfm": "^4.0.1",
     "y-codemirror.next": "^0.3.5",
     "y-indexeddb": "^9.0.12",
-    "y-webrtc": "^10.3.0",
+    "y-websocket": "^3.0.0",
     "yjs": "^13.6.31"
   },
   "devDependencies": {

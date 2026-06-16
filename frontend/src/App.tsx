@@ -48,7 +48,7 @@ function App() {
 function EditorWorkspace({ roomId }: { roomId: string }) {
   const { ytext, provider, awareness } = useYjs(roomId);
   const [content, setContent] = useState("");
-  const [peerIds, setPeerIds] = useState<string[]>([]);
+  const [peerCount, setPeerCount] = useState(0);
   const panelRef = useRef<PanelImperativeHandle>(null);
   const lastEditedTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -78,15 +78,13 @@ function EditorWorkspace({ roomId }: { roomId: string }) {
   }, [ytext, roomNameRaw]);
 
   useEffect(() => {
-    const handler = (event: {
-      webrtcPeers: string[];
-      bcPeers: string[];
-    }) => {
-      setPeerIds([...event.webrtcPeers, ...event.bcPeers]);
+    const handler = () => {
+      setPeerCount(awareness.getStates().size - 1);
     };
-    provider.on("peers", handler);
-    return () => provider.off("peers", handler);
-  }, [provider]);
+    awareness.on("change", handler);
+    handler();
+    return () => awareness.off("change", handler);
+  }, [awareness]);
 
   function handleRoomNameChange(name: string) {
     setRoomName(name);
@@ -99,8 +97,6 @@ function EditorWorkspace({ roomId }: { roomId: string }) {
       panelRef.current?.resize("50%");
     }
   }
-
-  const peerCount = peerIds.length;
 
   return (
     <>

@@ -1,20 +1,9 @@
 import { useEffect } from "react";
 import * as Y from "yjs";
-import { WebrtcProvider } from "y-webrtc";
+import { WebsocketProvider } from "y-websocket";
 import { IndexeddbPersistence } from "y-indexeddb";
 
-const TURN_CONFIG = {
-  iceServers: [
-    { urls: "stun:stun.relay.metered.ca:80" },
-    {
-      urls: "turn:global.relay.metered.ca:80",
-      username: import.meta.env.VITE_TURN_USERNAME,
-      credential: import.meta.env.VITE_TURN_CREDENTIAL,
-    },
-  ],
-};
-
-const WS_URL = import.meta.env.VITE_WS_URL || "ws://localhost:3001";
+const WS_URL = import.meta.env.VITE_WS_URL || `wss://${window.location.host}/ws`;
 
 function lsKey(roomName: string) {
   return `p2p-editor-${roomName}`;
@@ -23,7 +12,7 @@ function lsKey(roomName: string) {
 interface CachedEntry {
   ydoc: Y.Doc;
   ytext: Y.Text;
-  provider: WebrtcProvider;
+  provider: WebsocketProvider;
   indexeddb: IndexeddbPersistence;
   refCount: number;
 }
@@ -37,9 +26,8 @@ export function useYjs(roomId: string) {
   if (!entry) {
     const ydoc = new Y.Doc();
     const ytext = ydoc.getText("content");
-    const provider = new WebrtcProvider(roomName, ydoc, {
-      signaling: [WS_URL],
-      peerOpts: { config: TURN_CONFIG },
+    const provider = new WebsocketProvider(WS_URL, roomName, ydoc, {
+      disableBc: true,
     });
     const indexeddb = new IndexeddbPersistence(roomName, ydoc);
     entry = { ydoc, ytext, provider, indexeddb, refCount: 0 };

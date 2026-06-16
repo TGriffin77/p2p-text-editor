@@ -1,94 +1,132 @@
 import { WebSocketServer, WebSocket } from "ws";
+import * as Y from "yjs";
+import * as encoding from "lib0/encoding";
+import * as decoding from "lib0/decoding";
+import * as syncProtocol from "y-protocols/sync";
+import * as awarenessProtocol from "y-protocols/awareness";
 
 const PORT = parseInt(process.env.PORT || "3001");
 
-const topics = new Map<string, Set<WebSocket>>();
+const messageSync = 0;
+const messageAwareness = 1;
+const messageQueryAwareness = 3;
 
-function send(conn: WebSocket, message: object) {
-  if (conn.readyState === WebSocket.OPEN) {
-    conn.send(JSON.stringify(message));
-  }
+interface Room {
+  doc: Y.Doc;
+  awareness: awarenessProtocol.Awareness;
+  clients: Set<WebSocket>;
 }
 
-function timestamp(): string {
-  return new Date().toLocaleTimeString();
+const rooms = new Map<string, Room>();
+
+function getRoom(name: string): Room {
+  let room = rooms.get(name);
+  if (!room) {
+    const doc = new Y.Doc();
+    const awareness = new awarenessProtocol.Awareness(doc);
+    room = { doc, awareness, clients: new Set() };
+    rooms.set(name, room);
+  }
+  return room;
 }
 
 const wss = new WebSocketServer({ port: PORT });
-console.log(`[${timestamp()}] y-webrtc signaling server running on ws://localhost:${PORT}`);
+console.log(`y-websocket server running on ws://localhost:${PORT}`);
 
-wss.on("connection", (conn) => {
-  const subscribedTopics = new Set<string>();
-  let closed = false;
+wss.on("connection", (conn, req) => {
+  const roomName = (req.url || "").slice(1).split("?")[0] || "default";
+  const room = getRoom(roomName);
+  room.clients.add(conn);
 
-  const connId = `#${Math.random().toString(36).slice(2, 6)}`;
+  conn.binaryType = "arraybuffer";
 
-  console.log(`[${timestamp()}] ${connId} connected`);
+  {
+    const encoder = encoding.createEncoder();
+    encoding.writeVarUint(encoder, messageSync);
+    syncProtocol.writeSyncStep1(encoder, room.doc);
+    conn.send(encoding.toUint8Array(encoder));
+  }
+
+  {
+    const awarenessStates = room.awareness.getStates();
+    if (awarenessStates.size > 0) {
+      const encoder = encoding.createEncoder();
+      encoding.writeVarUint(encoder, messageAwareness);
+      encoding.writeVarUint8Array(
+        encoder,
+        awarenessProtocol.encodeAwarenessUpdate(
+          room.awareness,
+          Array.from(awarenessStates.keys())
+        )
+      );
+      conn.send(encoding.toUint8Array(encoder));
+    }
+  }
 
   conn.on("message", (raw) => {
-    let message: any;
-    try {
-      message = JSON.parse(raw.toString());
-    } catch {
-      return;
-    }
-    if (!message?.type || closed) return;
+    const data = new Uint8Array(
+      Array.isArray(raw) ? Buffer.concat(raw as Buffer[]) : (raw as Buffer)
+    );
 
-    switch (message.type) {
-      case "subscribe":
-        (message.topics || []).forEach((topic: string) => {
-          if (typeof topic !== "string") return;
-          if (subscribedTopics.has(topic)) return;
-          const set = topics.get(topic) ?? new Set();
-          set.add(conn);
-          topics.set(topic, set);
-          subscribedTopics.add(topic);
-          console.log(`[${timestamp()}] ${connId} subscribed to "${topic}"`);
+    const decoder = decoding.createDecoder(data);
+    const messageType = decoding.readVarUint(decoder);
+
+    switch (messageType) {
+      case messageSync: {
+        const encoder = encoding.createEncoder();
+        encoding.writeVarUint(encoder, messageSync);
+        try {
+          syncProtocol.readSyncMessage(decoder, encoder, room.doc, "server");
+        } catch {
+          return;
+        }
+        if (encoding.length(encoder) > 1) {
+          conn.send(encoding.toUint8Array(encoder));
+        }
+        room.clients.forEach((client) => {
+          if (client !== conn && client.readyState === WebSocket.OPEN) {
+            client.send(data);
+          }
         });
         break;
-      case "unsubscribe":
-        (message.topics || []).forEach((topic: string) => {
-          const set = topics.get(topic);
-          if (set) {
-            set.delete(conn);
-            if (set.size === 0) topics.delete(topic);
+      }
+      case messageAwareness: {
+        const awarenessUpdate = decoding.readVarUint8Array(decoder);
+        awarenessProtocol.applyAwarenessUpdate(room.awareness, awarenessUpdate, "server");
+        room.clients.forEach((client) => {
+          if (client !== conn && client.readyState === WebSocket.OPEN) {
+            client.send(data);
           }
-          subscribedTopics.delete(topic);
-          console.log(`[${timestamp()}] ${connId} unsubscribed from "${topic}"`);
         });
         break;
-      case "publish":
-        if (message.topic) {
-          const receivers = topics.get(message.topic);
-          if (receivers) {
-            const payload = JSON.stringify(message);
-            receivers.forEach((peer) => {
-              if (peer !== conn && peer.readyState === WebSocket.OPEN) {
-                peer.send(payload);
-              }
-            });
-          }
+      }
+      case messageQueryAwareness: {
+        const states = room.awareness.getStates();
+        if (states.size > 0) {
+          const encoder = encoding.createEncoder();
+          encoding.writeVarUint(encoder, messageAwareness);
+          encoding.writeVarUint8Array(
+            encoder,
+            awarenessProtocol.encodeAwarenessUpdate(
+              room.awareness,
+              Array.from(states.keys())
+            )
+          );
+          conn.send(encoding.toUint8Array(encoder));
         }
         break;
-      case "ping":
-        send(conn, { type: "pong" });
-        break;
+      }
     }
   });
 
-  conn.on("close", (code, reason) => {
-    closed = true;
-    subscribedTopics.forEach((topic) => {
-      const set = topics.get(topic);
-      if (set) {
-        set.delete(conn);
-        if (set.size === 0) topics.delete(topic);
-      }
-    });
-    console.log(`[${timestamp()}] ${connId} disconnected (code=${code} reason=${reason.toString().slice(0, 40) || "none"})`);
+  conn.on("close", () => {
+    room.clients.delete(conn);
+    if (room.clients.size === 0) {
+      rooms.delete(roomName);
+    }
   });
 
   conn.on("error", (err) => {
-    console.error(`[${timestamp()}] ${connId} error:`, err.message);
+    console.error(`WebSocket error:`, err.message);
   });
 });
