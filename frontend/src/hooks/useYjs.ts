@@ -119,5 +119,5 @@ export function useYjs(roomId: string) {
     };
   }, [roomName, ydoc]);
 
-  return { ydoc, ytext, provider };
+  return { ydoc, ytext, provider, awareness: provider.awareness };
 }

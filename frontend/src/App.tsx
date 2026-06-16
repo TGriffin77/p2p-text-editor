@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import "./App.css";
 import Editor from "./components/Editor";
 import Preview from "./components/Preview";
@@ -11,21 +11,19 @@ import {
 } from "react-resizable-panels";
 import { useYjs } from "./hooks/useYjs";
 import StatusWorkspace from "./components/StatusWorkspace";
+import UserSettings from "./components/UserSettings";
 import handleRoomHash from "./util/handleRoomHash";
 
 function App() {
   const [roomId, setRoomId] = useState(handleRoomHash);
-  const { ydoc, ytext, provider } = useYjs(roomId);
+  const { ytext, provider, awareness } = useYjs(roomId);
 
   const [content, setContent] = useState("");
   const [peerIds, setPeerIds] = useState<string[]>([]);
   const panelRef = useRef<PanelImperativeHandle>(null);
 
-  // ytext → content (remote changes + initial persisted load)
   useEffect(() => {
-    const handler = (_event: unknown, txn: unknown) => {
-      const transaction = txn as { origin?: unknown };
-      if (transaction.origin === "user") return;
+    const handler = () => {
       setContent(ytext.toString());
     };
     ytext.observe(handler);
@@ -34,7 +32,6 @@ function App() {
     return () => ytext.unobserve(handler);
   }, [ytext]);
 
-  // Track connected peers
   useEffect(() => {
     const handler = (event: {
       webrtcPeers: string[];
@@ -46,19 +43,6 @@ function App() {
     return () => provider.off("peers", handler);
   }, [provider]);
 
-  // content → ytext (local edits)
-  const handleChange = useCallback(
-    (newContent: string) => {
-      ydoc.transact(() => {
-        ytext.delete(0, ytext.length);
-        ytext.insert(0, newContent);
-      }, "user");
-      setContent(newContent);
-    },
-    [ydoc, ytext],
-  );
-
-  // Handle manual hash change
   useEffect(() => {
     const onHashChange = () => {
       const hash = window.location.hash;
@@ -80,8 +64,10 @@ function App() {
   return (
     <>
       <h1 className="text-2xl font-bold mb-4">My App</h1>
-      <div className="text-sm text-gray-500 mb-2">
-        Room: {roomId} | Peers: {peerCount}
+      <div className="text-sm text-gray-500 mb-2 flex items-center gap-2">
+        <span>Room: {roomId} | Peers: {peerCount}</span>
+        <span>|</span>
+        <UserSettings awareness={awareness} />
       </div>
       <StatusWorkspace />
       <div className="flex flex-col w-full h-screen">
@@ -92,7 +78,7 @@ function App() {
             defaultSize="50%"
             minSize="30%"
           >
-            <Editor value={content} onChange={handleChange} />
+            <Editor ytext={ytext} awareness={awareness} />
           </Panel>
           <Separator />
           <Panel id="preview" defaultSize="50%" minSize="30%">
