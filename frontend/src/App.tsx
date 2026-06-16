@@ -12,25 +12,70 @@ import {
 import { useYjs } from "./hooks/useYjs";
 import StatusWorkspace from "./components/StatusWorkspace";
 import UserSettings from "./components/UserSettings";
+import WelcomePage from "./components/WelcomePage";
 import handleRoomHash from "./util/handleRoomHash";
+import {
+  addRoomToHistory,
+  getRoomHistory,
+  updateRoomName,
+  updateRoomLastEdited,
+} from "./util/roomHistory";
 
 function App() {
-  const [roomId, setRoomId] = useState(handleRoomHash);
-  const { ytext, provider, awareness } = useYjs(roomId);
+  const [roomId, setRoomId] = useState<string | null>(handleRoomHash);
 
+  useEffect(() => {
+    const onHashChange = () => {
+      const hash = window.location.hash;
+      setRoomId(hash || null);
+    };
+    window.addEventListener("hashchange", onHashChange);
+    return () => window.removeEventListener("hashchange", onHashChange);
+  }, []);
+
+  useEffect(() => {
+    if (roomId) {
+      const id = roomId.startsWith("#") ? roomId.slice(1) : roomId;
+      addRoomToHistory(id);
+    }
+  }, [roomId]);
+
+  if (!roomId) return <WelcomePage />;
+
+  return <EditorWorkspace key={roomId} roomId={roomId} />;
+}
+
+function EditorWorkspace({ roomId }: { roomId: string }) {
+  const { ytext, provider, awareness } = useYjs(roomId);
   const [content, setContent] = useState("");
   const [peerIds, setPeerIds] = useState<string[]>([]);
   const panelRef = useRef<PanelImperativeHandle>(null);
+  const lastEditedTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const roomNameRaw = roomId.startsWith("#") ? roomId.slice(1) : roomId;
+  const [roomName, setRoomName] = useState(() => {
+    const history = getRoomHistory();
+    return history.find((e) => e.id === roomNameRaw)?.name || "";
+  });
 
   useEffect(() => {
     const handler = () => {
       setContent(ytext.toString());
+      if (ytext.toString()) {
+        clearTimeout(lastEditedTimer.current ?? undefined);
+        lastEditedTimer.current = setTimeout(() => {
+          updateRoomLastEdited(roomNameRaw);
+        }, 2000);
+      }
     };
     ytext.observe(handler);
     // eslint-disable-next-line react-hooks/set-state-in-effect -- initialize from external Yjs store
     setContent(ytext.toString());
-    return () => ytext.unobserve(handler);
-  }, [ytext]);
+    return () => {
+      ytext.unobserve(handler);
+      clearTimeout(lastEditedTimer.current ?? undefined);
+    };
+  }, [ytext, roomNameRaw]);
 
   useEffect(() => {
     const handler = (event: {
@@ -43,14 +88,10 @@ function App() {
     return () => provider.off("peers", handler);
   }, [provider]);
 
-  useEffect(() => {
-    const onHashChange = () => {
-      const hash = window.location.hash;
-      if (hash) setRoomId(hash);
-    };
-    window.addEventListener("hashchange", onHashChange);
-    return () => window.removeEventListener("hashchange", onHashChange);
-  }, []);
+  function handleRoomNameChange(name: string) {
+    setRoomName(name);
+    updateRoomName(roomNameRaw, name);
+  }
 
   function handleLayoutChanged(layout: Layout) {
     const editorSize = layout["editor"];
@@ -63,9 +104,19 @@ function App() {
 
   return (
     <>
-      <h1 className="text-2xl font-bold mb-4">My App</h1>
+      <h1 className="text-2xl font-bold mb-4">P2P Text Editor</h1>
       <div className="text-sm text-gray-500 mb-2 flex items-center gap-2">
-        <span>Room: {roomId} | Peers: {peerCount}</span>
+        <input
+          type="text"
+          value={roomName}
+          onChange={(e) => handleRoomNameChange(e.target.value)}
+          placeholder="Room name..."
+          className="border border-transparent hover:border-gray-300 focus:border-gray-400 rounded px-1.5 py-0.5 text-sm outline-none bg-transparent w-40"
+        />
+        <span className="text-xs text-gray-400 font-mono">
+          #{roomNameRaw.slice(0, 8)}
+        </span>
+        <span>| Peers: {peerCount}</span>
         <span>|</span>
         <UserSettings awareness={awareness} />
       </div>
