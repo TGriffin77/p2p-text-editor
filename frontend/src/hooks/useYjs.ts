@@ -37,6 +37,21 @@ export function useYjs(roomId: string) {
   const { ydoc, ytext, provider, indexeddb } = entry;
 
   useEffect(() => {
+    const onStatus = (event: { status: string }) => {
+      console.log(`y-websocket (${roomName}):`, event.status);
+    };
+    const onSynced = (synced: boolean) => {
+      console.log(`y-websocket (${roomName}):`, synced ? "synced" : "not synced");
+    };
+    provider.on("status", onStatus);
+    provider.on("synced", onSynced);
+    return () => {
+      provider.off("status", onStatus);
+      provider.off("synced", onSynced);
+    };
+  }, [roomName, provider]);
+
+  useEffect(() => {
     const e = cache.get(roomName);
     if (!e) return;
     e.refCount++;
