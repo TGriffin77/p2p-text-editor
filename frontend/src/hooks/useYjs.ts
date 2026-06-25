@@ -12,6 +12,7 @@ function lsKey(roomName: string) {
 interface CachedEntry {
   ydoc: Y.Doc;
   ytext: Y.Text;
+  yname: Y.Text;
   provider: WebsocketProvider;
   indexeddb: IndexeddbPersistence;
   refCount: number;
@@ -26,15 +27,16 @@ export function useYjs(roomId: string) {
   if (!entry) {
     const ydoc = new Y.Doc();
     const ytext = ydoc.getText("content");
+    const yname = ydoc.getText("name");
     const provider = new WebsocketProvider(WS_URL, roomName, ydoc, {
       disableBc: true,
     });
     const indexeddb = new IndexeddbPersistence(roomName, ydoc);
-    entry = { ydoc, ytext, provider, indexeddb, refCount: 0 };
+    entry = { ydoc, ytext, yname, provider, indexeddb, refCount: 0 };
     cache.set(roomName, entry);
   }
 
-  const { ydoc, ytext, provider, indexeddb } = entry;
+  const { ydoc, ytext, yname, provider, indexeddb } = entry;
 
   useEffect(() => {
     const onStatus = (event: { status: string }) => {
@@ -122,5 +124,5 @@ export function useYjs(roomId: string) {
     };
   }, [roomName, ydoc]);
 
-  return { ydoc, ytext, provider, awareness: provider.awareness };
+  return { ydoc, ytext, yname, provider, awareness: provider.awareness };
 }

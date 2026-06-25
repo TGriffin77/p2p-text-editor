@@ -16,7 +16,6 @@ import WelcomePage from "./components/WelcomePage";
 import handleRoomHash from "./util/handleRoomHash";
 import {
   addRoomToHistory,
-  getRoomHistory,
   updateRoomName,
   updateRoomLastEdited,
 } from "./util/roomHistory";
@@ -46,17 +45,14 @@ function App() {
 }
 
 function EditorWorkspace({ roomId }: { roomId: string }) {
-  const { ytext, provider, awareness } = useYjs(roomId);
+  const { ytext, yname, awareness } = useYjs(roomId);
   const [content, setContent] = useState("");
   const [peerCount, setPeerCount] = useState(0);
   const panelRef = useRef<PanelImperativeHandle>(null);
   const lastEditedTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const roomNameRaw = roomId.startsWith("#") ? roomId.slice(1) : roomId;
-  const [roomName, setRoomName] = useState(() => {
-    const history = getRoomHistory();
-    return history.find((e) => e.id === roomNameRaw)?.name || "";
-  });
+  const [roomName, setRoomName] = useState(() => yname.toString());
 
   useEffect(() => {
     const handler = () => {
@@ -79,6 +75,18 @@ function EditorWorkspace({ roomId }: { roomId: string }) {
 
   useEffect(() => {
     const handler = () => {
+      const name = yname.toString();
+      setRoomName(name);
+      updateRoomName(roomNameRaw, name);
+    };
+    yname.observe(handler);
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- initialize from external Yjs store
+    setRoomName(yname.toString());
+    return () => yname.unobserve(handler);
+  }, [yname, roomNameRaw]);
+
+  useEffect(() => {
+    const handler = () => {
       setPeerCount(awareness.getStates().size - 1);
     };
     awareness.on("change", handler);
@@ -88,6 +96,8 @@ function EditorWorkspace({ roomId }: { roomId: string }) {
 
   function handleRoomNameChange(name: string) {
     setRoomName(name);
+    yname.delete(0, yname.length);
+    yname.insert(0, name);
     updateRoomName(roomNameRaw, name);
   }
 
