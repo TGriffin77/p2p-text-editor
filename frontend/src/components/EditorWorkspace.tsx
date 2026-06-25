@@ -37,7 +37,6 @@ export default function EditorWorkspace({ roomId }: { roomId: string }) {
       }
     };
     ytext.observe(handler);
-    // eslint-disable-next-line react-hooks/set-state-in-effect -- initialize from external Yjs store
     setContent(ytext.toString());
     return () => {
       ytext.unobserve(handler);
@@ -52,7 +51,6 @@ export default function EditorWorkspace({ roomId }: { roomId: string }) {
       updateRoomName(roomNameRaw, name);
     };
     yname.observe(handler);
-    // eslint-disable-next-line react-hooks/set-state-in-effect -- initialize from external Yjs store
     setRoomName(yname.toString());
     return () => yname.unobserve(handler);
   }, [yname, roomNameRaw]);
