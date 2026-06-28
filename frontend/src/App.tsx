@@ -1,5 +1,4 @@
 import { lazy, Suspense, useEffect, useState } from "react";
-import "./App.css";
 import WelcomePage from "./components/WelcomePage";
 import handleRoomHash from "./util/handleRoomHash";
 import { addRoomToHistory } from "./util/roomHistory";

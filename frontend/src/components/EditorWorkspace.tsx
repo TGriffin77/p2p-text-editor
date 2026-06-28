@@ -9,7 +9,6 @@ import {
   type PanelImperativeHandle,
 } from "react-resizable-panels";
 import { useYjs } from "../hooks/useYjs";
-import StatusWorkspace from "./StatusWorkspace";
 import UserSettings from "./UserSettings";
 import {
   updateRoomName,
@@ -28,8 +27,9 @@ export default function EditorWorkspace({ roomId }: { roomId: string }) {
 
   useEffect(() => {
     const handler = () => {
-      setContent(ytext.toString());
-      if (ytext.toString()) {
+      const text = ytext.toString();
+      setContent(text);
+      if (text) {
         clearTimeout(lastEditedTimer.current ?? undefined);
         lastEditedTimer.current = setTimeout(() => {
           updateRoomLastEdited(roomNameRaw);
@@ -37,6 +37,7 @@ export default function EditorWorkspace({ roomId }: { roomId: string }) {
       }
     };
     ytext.observe(handler);
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- initialize from external Yjs store
     setContent(ytext.toString());
     return () => {
       ytext.unobserve(handler);
@@ -51,6 +52,7 @@ export default function EditorWorkspace({ roomId }: { roomId: string }) {
       updateRoomName(roomNameRaw, name);
     };
     yname.observe(handler);
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- initialize from external Yjs store
     setRoomName(yname.toString());
     return () => yname.unobserve(handler);
   }, [yname, roomNameRaw]);
@@ -96,7 +98,6 @@ export default function EditorWorkspace({ roomId }: { roomId: string }) {
         <span>|</span>
         <UserSettings awareness={awareness} />
       </div>
-      <StatusWorkspace />
       <div className="flex flex-col w-full h-screen">
         <Group orientation="horizontal" onLayoutChange={handleLayoutChanged}>
           <Panel

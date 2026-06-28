@@ -70,7 +70,7 @@ export default function WelcomePage() {
   }, [userOpen]);
 
   function openRoom(id: string) {
-    addRoomToHistory(id);
+    // eslint-disable-next-line react-hooks/immutability
     window.location.hash = "#" + id;
   }
 
