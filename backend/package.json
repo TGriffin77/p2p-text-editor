@@ -8,9 +8,7 @@
     "start": "node dist/server.js"
   },
   "dependencies": {
-    "ws": "^8.18.1",
-    "y-websocket": "^3.0.0",
-    "yjs": "^13.6.31"
+    "ws": "^8.18.1"
   },
   "devDependencies": {
     "@types/ws": "^8.18.1",

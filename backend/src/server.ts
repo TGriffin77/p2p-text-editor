@@ -1,175 +1,110 @@
-import { WebSocketServer, WebSocket } from "ws";
-import * as Y from "yjs";
-import * as encoding from "lib0/encoding";
-import * as decoding from "lib0/decoding";
-import * as syncProtocol from "y-protocols/sync";
-import * as awarenessProtocol from "y-protocols/awareness";
+import { WebSocketServer } from "ws";
 
 const PORT = parseInt(process.env.PORT || "3001");
 
-const messageSync = 0;
-const messageAwareness = 1;
-const messageQueryAwareness = 3;
-
-const messageLabels: Record<number, string> = {
-  [messageSync]: "sync",
-  [messageAwareness]: "awareness",
-  [messageQueryAwareness]: "query-awareness",
-};
-
-interface Room {
-  doc: Y.Doc;
-  awareness: awarenessProtocol.Awareness;
-  clients: Set<WebSocket>;
-}
-
-const rooms = new Map<string, Room>();
-
-function connId(): string {
-  return `#${Math.random().toString(36).slice(2, 6)}`;
-}
-
-function ts(): string {
-  return new Date().toLocaleTimeString();
-}
-
-function getRoom(name: string): Room {
-  let room = rooms.get(name);
-  if (!room) {
-    const doc = new Y.Doc();
-    const awareness = new awarenessProtocol.Awareness(doc);
-    room = { doc, awareness, clients: new Set() };
-    rooms.set(name, room);
-    console.log(`[${ts()}] room "${name}" created`);
-  }
-  return room;
-}
+const topics = new Map<string, Set<any>>();
 
 const wss = new WebSocketServer({ port: PORT });
-console.log(`[${ts()}] y-websocket server running on ws://localhost:${PORT}`);
+console.log(`signaling server running on ws://localhost:${PORT}`);
 
-wss.on("connection", (conn, req) => {
-  const id = connId();
-  const roomName = (req.url || "").slice(1).split("?")[0] || "default";
-  const room = getRoom(roomName);
-  room.clients.add(conn);
+wss.on("connection", (conn) => {
+  const subscribedTopics = new Set<string>();
+  let closed = false;
 
-  console.log(`[${ts()}] ${id} connected to "${roomName}" (peers: ${room.clients.size})`);
-
-  conn.binaryType = "arraybuffer";
-
-  {
-    const encoder = encoding.createEncoder();
-    encoding.writeVarUint(encoder, messageSync);
-    syncProtocol.writeSyncStep1(encoder, room.doc);
-    conn.send(encoding.toUint8Array(encoder));
-    console.log(`[${ts()}] ${id} ← sync step 1 (server → client, ${encoding.length(encoder)} bytes)`);
-  }
-
-  {
-    const awarenessStates = room.awareness.getStates();
-    if (awarenessStates.size > 0) {
-      const encoder = encoding.createEncoder();
-      encoding.writeVarUint(encoder, messageAwareness);
-      encoding.writeVarUint8Array(
-        encoder,
-        awarenessProtocol.encodeAwarenessUpdate(
-          room.awareness,
-          Array.from(awarenessStates.keys())
-        )
-      );
-      conn.send(encoding.toUint8Array(encoder));
-      console.log(`[${ts()}] ${id} ← awareness (${awarenessStates.size} states, ${encoding.length(encoder)} bytes)`);
+  let pongReceived = true;
+  const pingInterval = setInterval(() => {
+    if (!pongReceived) {
+      conn.close();
+      clearInterval(pingInterval);
+    } else {
+      pongReceived = false;
+      try {
+        conn.ping();
+      } catch {
+        conn.close();
+      }
     }
-  }
+  }, 30000);
 
-  conn.on("message", (raw) => {
-    const data = new Uint8Array(
-      Array.isArray(raw) ? Buffer.concat(raw as Buffer[]) : (raw as Buffer)
-    );
-
-    const decoder = decoding.createDecoder(data);
-    const messageType = decoding.readVarUint(decoder);
-
-    const label = messageLabels[messageType] ?? `unknown(${messageType})`;
-
-    switch (messageType) {
-      case messageSync: {
-        const encoder = encoding.createEncoder();
-        encoding.writeVarUint(encoder, messageSync);
-        try {
-          syncProtocol.readSyncMessage(decoder, encoder, room.doc, "server");
-        } catch {
-          console.log(`[${ts()}] ${id} ← ${label} (parse error, ${data.length} bytes)`);
-          return;
-        }
-        const responseLen = encoding.length(encoder);
-        if (responseLen > 1) {
-          conn.send(encoding.toUint8Array(encoder));
-        }
-        let peerCount = 0;
-        room.clients.forEach((client) => {
-          if (client !== conn && client.readyState === WebSocket.OPEN) {
-            client.send(data);
-            peerCount++;
-          }
-        });
-        console.log(
-          `[${ts()}] ${id} → ${label} (${data.length} bytes, resp: ${responseLen} bytes, relayed to ${peerCount} peers)`
-        );
-        break;
-      }
-      case messageAwareness: {
-        const awarenessUpdate = decoding.readVarUint8Array(decoder);
-        awarenessProtocol.applyAwarenessUpdate(room.awareness, awarenessUpdate, "server");
-        let peerCount = 0;
-        room.clients.forEach((client) => {
-          if (client !== conn && client.readyState === WebSocket.OPEN) {
-            client.send(data);
-            peerCount++;
-          }
-        });
-        console.log(
-          `[${ts()}] ${id} → ${label} (${data.length} bytes, ${awarenessUpdate.length} bytes update, relayed to ${peerCount} peers)`
-        );
-        break;
-      }
-      case messageQueryAwareness: {
-        const states = room.awareness.getStates();
-        if (states.size > 0) {
-          const encoder = encoding.createEncoder();
-          encoding.writeVarUint(encoder, messageAwareness);
-          encoding.writeVarUint8Array(
-            encoder,
-            awarenessProtocol.encodeAwarenessUpdate(
-              room.awareness,
-              Array.from(states.keys())
-            )
-          );
-          conn.send(encoding.toUint8Array(encoder));
-          console.log(
-            `[${ts()}] ${id} ← query-awareness → ${states.size} states (${encoding.length(encoder)} bytes)`
-          );
-        } else {
-          console.log(`[${ts()}] ${id} ← query-awareness (no states)`);
-        }
-        break;
-      }
-      default:
-        console.log(`[${ts()}] ${id} ← ${label} (${data.length} bytes, unhandled)`);
-    }
+  conn.on("pong", () => {
+    pongReceived = true;
   });
 
   conn.on("close", () => {
-    room.clients.delete(conn);
-    console.log(`[${ts()}] ${id} disconnected from "${roomName}" (peers: ${room.clients.size})`);
-    if (room.clients.size === 0) {
-      rooms.delete(roomName);
-      console.log(`[${ts()}] room "${roomName}" deleted (no clients left)`);
-    }
+    closed = true;
+    clearInterval(pingInterval);
+    subscribedTopics.forEach((topicName) => {
+      const subs = topics.get(topicName);
+      if (subs) {
+        subs.delete(conn);
+        if (subs.size === 0) topics.delete(topicName);
+      }
+    });
+    subscribedTopics.clear();
   });
 
-  conn.on("error", (err) => {
-    console.error(`[${ts()}] ${id} error:`, err.message);
+  conn.on("message", (raw) => {
+    if (closed) return;
+    try {
+      const message =
+        typeof raw === "string" || Buffer.isBuffer(raw)
+          ? JSON.parse(raw.toString())
+          : raw;
+      if (!message || !message.type) return;
+
+      switch (message.type) {
+        case "subscribe": {
+          const topicsList: string[] = message.topics || [];
+          topicsList.forEach((topicName: string) => {
+            if (typeof topicName === "string") {
+              let topic = topics.get(topicName);
+              if (!topic) {
+                topic = new Set();
+                topics.set(topicName, topic);
+              }
+              topic.add(conn);
+              subscribedTopics.add(topicName);
+            }
+          });
+          break;
+        }
+        case "unsubscribe": {
+          const topicsList: string[] = message.topics || [];
+          topicsList.forEach((topicName: string) => {
+            subscribedTopics.delete(topicName);
+            const subs = topics.get(topicName);
+            if (subs) subs.delete(conn);
+          });
+          break;
+        }
+        case "publish": {
+          if (message.topic) {
+            const receivers = topics.get(message.topic);
+            if (receivers) {
+              message.clients = receivers.size;
+              receivers.forEach((receiver: any) => {
+                if (receiver !== conn && receiver.readyState === 1) {
+                  try {
+                    receiver.send(JSON.stringify(message));
+                  } catch {
+                    receiver.close();
+                  }
+                }
+              });
+            }
+          }
+          break;
+        }
+        case "ping":
+          try {
+            conn.send(JSON.stringify({ type: "pong" }));
+          } catch {
+            conn.close();
+          }
+          break;
+      }
+    } catch {
+      // ignore malformed messages
+    }
   });
 });

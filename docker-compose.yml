@@ -8,8 +8,6 @@ services:
   frontend:
     build:
       context: ./frontend
-      args:
-        VITE_WS_URL: ws://localhost:3001
     ports:
       - "8080:80"
     depends_on:
